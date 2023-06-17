@@ -1,0 +1,24 @@
+# Copyright (c) 2023 EPAM Systems
+# SPDX-License-Identifier: Apache-2.0
+
+mainmenu "OPTEE Library"
+
+config OPTEE_CLIENT
+	bool "Enable optee-client"
+	help
+	  Enable OP-TEE client libraries. Application can use this
+	  library for use OP-TEE capabilities and services. This
+	  includes libteec, libckteec, libseteec, libteecacl libraries
+	  and tee supplicant
+
+if OPTEE_CLIENT
+
+config OPTEE_LIBTEEC
+	bool "Enable libteec"
+	help
+	  Enable libteec library. Basic library for other OP-TEE
+	  client libraries. This library performes calls to OP-TEE.
+	  Library also provides basic function for allocate/release
+	  shared with OP-TEE memory
+
+endif
