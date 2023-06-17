@@ -21,4 +21,13 @@ config OPTEE_LIBTEEC
 	  Library also provides basic function for allocate/release
 	  shared with OP-TEE memory
 
+config OPTEE_LIBCKTEEC
+	bool "Enable libckteec"
+	depends on LIBTEEC
+	help
+	  This library gives ability to use Public-key Cryptography
+	  Standards #11 (PKCS #11).
+	  API provided by loadable trusted application. This application
+	  is loaded during library initialization procedure.
+
 endif
