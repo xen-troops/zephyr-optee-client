@@ -120,6 +120,66 @@ static int load_ta(uint32_t num_params, struct tee_param *params)
 	return TEEC_SUCCESS;
 }
 
+static int shm_alloc(const struct device *dev, uint32_t num_params,
+		     struct tee_param *params)
+{
+	void *addr;
+	size_t size;
+
+	if (num_params != 1) {
+		return TEEC_ERROR_BAD_PARAMETERS;
+	}
+
+	switch (params[0].attr & TEE_PARAM_ATTR_TYPE_MASK) {
+	case TEE_PARAM_ATTR_TYPE_VALUE_INPUT:
+	case TEE_PARAM_ATTR_TYPE_VALUE_OUTPUT:
+	case TEE_PARAM_ATTR_TYPE_VALUE_INOUT:
+		size = params[0].b;
+		break;
+	default:
+		return TEEC_ERROR_BAD_PARAMETERS;
+	}
+
+	/*TODO: check for TEE_GEN_CAP_REG_MEM */
+	/*TODO: page-aligned allocation may not be required here, also we'd
+	 * better double check what alignment optee wants
+	 */
+	addr = k_aligned_alloc(CONFIG_MMU_PAGE_SIZE, size);
+	if (!addr) {
+		return TEEC_ERROR_OUT_OF_MEMORY;
+	}
+
+	params[0].c = (uint64_t)addr;
+
+	return TEEC_SUCCESS;
+}
+
+static int shm_free(uint32_t num_params, struct tee_param *params)
+{
+	struct tee_shm *shm = NULL;
+
+	if (num_params != 1) {
+		return TEEC_ERROR_BAD_PARAMETERS;
+	}
+
+	switch (params[0].attr & TEE_PARAM_ATTR_TYPE_MASK) {
+	case TEE_PARAM_ATTR_TYPE_VALUE_INPUT:
+	case TEE_PARAM_ATTR_TYPE_VALUE_OUTPUT:
+	case TEE_PARAM_ATTR_TYPE_VALUE_INOUT:
+		shm = (struct tee_shm *)params[0].b;
+		break;
+	default:
+		return TEEC_ERROR_BAD_PARAMETERS;
+	}
+
+	if (!shm || !shm->addr) {
+		return TEEC_ERROR_BAD_PARAMETERS;
+	}
+
+	k_free(shm->addr);
+	return TEEC_SUCCESS;
+}
+
 static int process_request(const struct device *dev)
 {
 	int rc;
@@ -136,6 +196,12 @@ static int process_request(const struct device *dev)
 	switch (ts_msg.cmd_ret) {
 	case OPTEE_MSG_RPC_CMD_LOAD_TA:
 		rc = load_ta(ts_msg.num_param, ts_msg.params);
+		break;
+	case OPTEE_MSG_RPC_CMD_SHM_ALLOC:
+		rc = shm_alloc(dev, ts_msg.num_param, ts_msg.params);
+		break;
+	case OPTEE_MSG_RPC_CMD_SHM_FREE:
+		rc = shm_free(ts_msg.num_param, ts_msg.params);
 		break;
 	default:
 		return TEEC_ERROR_NOT_SUPPORTED;
