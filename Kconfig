@@ -30,4 +30,13 @@ config OPTEE_LIBCKTEEC
 	  API provided by loadable trusted application. This application
 	  is loaded during library initialization procedure.
 
+config OPTEE_TEE_SUPPLICANT
+	bool "Enable build of TEE Supplicant"
+	depends on OPTEE_LIBTEEC
+	help
+	  tee-supplicant is intermediary between OP-TEE and application.
+	  It allocates memory in application for OP-TEE, loads trusted
+	  applications from application and perform file system operation
+	  on non-volatile memory devices which inaccessible from OP-TEE
+
 endif
