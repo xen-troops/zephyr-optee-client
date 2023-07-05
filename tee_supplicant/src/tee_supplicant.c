@@ -12,6 +12,7 @@
 #include <optee_msg_supplicant.h>
 #include <tee_client_api.h>
 #include <teec_ta_load.h>
+#include <ree_fs.h>
 
 LOG_MODULE_REGISTER(tee_supplicant);
 
@@ -196,6 +197,9 @@ static int process_request(const struct device *dev)
 	switch (ts_msg.cmd_ret) {
 	case OPTEE_MSG_RPC_CMD_LOAD_TA:
 		rc = load_ta(ts_msg.num_param, ts_msg.params);
+		break;
+	case OPTEE_MSG_RPC_CMD_FS:
+		rc = tee_fs(ts_msg.num_param, ts_msg.params);
 		break;
 	case OPTEE_MSG_RPC_CMD_SHM_ALLOC:
 		rc = shm_alloc(dev, ts_msg.num_param, ts_msg.params);
