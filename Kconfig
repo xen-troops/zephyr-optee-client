@@ -23,7 +23,7 @@ config OPTEE_LIBTEEC
 
 config OPTEE_LIBCKTEEC
 	bool "Enable libckteec"
-	depends on LIBTEEC
+	depends on OPTEE_LIBTEEC
 	help
 	  This library gives ability to use Public-key Cryptography
 	  Standards #11 (PKCS #11).
