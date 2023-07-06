@@ -813,7 +813,7 @@ TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 
 void TEEC_ReleaseSharedMemory(TEEC_SharedMemory *shm)
 {
-	if (!shm || shm->id == -1 || shm->dev)
+	if (!shm || shm->id == -1 || !shm->dev)
 		return;
 
 	if (shm->shadow_buffer) {
