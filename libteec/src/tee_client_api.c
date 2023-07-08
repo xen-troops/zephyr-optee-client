@@ -795,6 +795,7 @@ TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 			return TEEC_ERROR_OUT_OF_MEMORY;
 		}
 		shm->registered_shm = shmem;
+		shm->id = (unsigned long)shmem;
 	} else {
 		shm->buffer = teec_shm_alloc(ctx->dev, s, 0);
 
