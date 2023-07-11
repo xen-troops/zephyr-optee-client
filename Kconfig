@@ -39,4 +39,15 @@ config OPTEE_TEE_SUPPLICANT
 	  applications from application and perform file system operation
 	  on non-volatile memory devices which inaccessible from OP-TEE
 
+config OPTEE_LIBSETEEC
+	bool "Enable libseteec"
+	depends on OPTEE_LIBTEEC
+	select POSIX_API
+	help
+	  libseteec stands for secure element control. A Secure Element (SE)
+	  is a tamper-resistant platform capable of securely hosting
+	  applications and their confidential and cryptographic data
+	  (e.g. key management) in accordance with the rules and security
+	  requirements set forth by a set of well-identified trusted authorities.
+
 endif
