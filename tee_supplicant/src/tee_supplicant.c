@@ -8,11 +8,13 @@
 #include <zephyr/init.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/dlist.h>
 
 #include <optee_msg_supplicant.h>
 #include <tee_client_api.h>
 #include <teec_ta_load.h>
 #include <ree_fs.h>
+#include "tee_supplicant.h"
 
 LOG_MODULE_REGISTER(tee_supplicant);
 
@@ -20,14 +22,19 @@ LOG_MODULE_REGISTER(tee_supplicant);
 
 #define TEE_REQ_PARAM_MAX	5
 
+#define MEM_ID(id) ((id) ? (uint64_t)((struct tee_shm *)(id))->addr : 0)
 static struct k_thread main_thread;
 static K_THREAD_STACK_DEFINE(main_stack, 8192);
 
+static sys_dlist_t shm_list;
 static K_MUTEX_DEFINE(shm_mutex);
 
-#define MEMREF_SHM_ID(p)	((p)->c)
-#define MEMREF_SHM_OFFS(p)	((p)->a)
-#define MEMREF_SIZE(p)		((p)->b)
+/* Helpers to access memref parts of a struct tee_param */
+#define MEMREF_SHM_ID(p)          ((p)->c)
+#define MEMREF_SHM_OFFS(p)        ((p)->a)
+#define MEMREF_SIZE(p)            ((p)->b)
+#define SET_MEMREF_SHM_ID(p, v)   ((p)->c = (v))
+#define SET_MEMREF_SIZE(p, v)     ((p)->b = (v))
 
 struct tee_supp_msg {
 	uint32_t cmd_ret;
@@ -41,6 +48,13 @@ struct param_value {
 	uint64_t c;
 };
 
+struct suppl_shm {
+	uint64_t id;
+	void *p;
+	size_t size;
+	sys_dnode_t link;
+};
+
 static int receive_request(const struct device *dev, struct tee_supp_msg *ts_req)
 {
 	int rc = tee_suppl_recv(dev, &ts_req->cmd_ret, &ts_req->num_param, ts_req->params);
@@ -50,6 +64,83 @@ static int receive_request(const struct device *dev, struct tee_supp_msg *ts_req
 	}
 
 	return rc;
+}
+
+static struct suppl_shm *find_shm(uint64_t id)
+{
+	struct suppl_shm *node;
+	uint64_t mem_id;
+
+	if (!id) {
+		return NULL;
+	}
+	mem_id = MEM_ID(id);
+
+	k_mutex_lock(&shm_mutex, K_FOREVER);
+
+	SYS_DLIST_FOR_EACH_CONTAINER(&shm_list, node, link) {
+		if (node->id == mem_id) {
+			break;
+		}
+	}
+
+	k_mutex_unlock(&shm_mutex);
+	return node;
+}
+
+static struct suppl_shm *remove_shm(uint64_t id)
+{
+	struct suppl_shm *node;
+	uint64_t mem_id;
+
+	if (!id) {
+		return NULL;
+	}
+	mem_id = MEM_ID(id);
+
+	k_mutex_lock(&shm_mutex, K_FOREVER);
+
+	node = find_shm(id);
+	if (node) {
+		sys_dlist_remove(&node->link);
+	}
+	k_mutex_unlock(&shm_mutex);
+
+	return node;
+}
+
+static void append_shm(struct suppl_shm *shm)
+{
+	k_mutex_lock(&shm_mutex, K_FOREVER);
+
+	sys_dnode_init(&shm->link);
+	sys_dlist_append(&shm_list, &shm->link);
+
+	k_mutex_unlock(&shm_mutex);
+}
+
+void *tee_param_get_mem(struct tee_param *param, size_t *size)
+{
+	struct suppl_shm *shm = NULL;
+
+	switch (param->attr & TEE_PARAM_ATTR_TYPE_MASK) {
+	case TEE_PARAM_ATTR_TYPE_MEMREF_INPUT:
+	case TEE_PARAM_ATTR_TYPE_MEMREF_OUTPUT:
+	case TEE_PARAM_ATTR_TYPE_MEMREF_INOUT:
+		break;
+	default:
+		return NULL;
+	}
+
+	shm = find_shm(MEMREF_SHM_ID(param));
+	if (!shm) {
+		return NULL;
+	}
+
+	if (size) {
+		*size = shm->size;
+	}
+	return shm->p;
 }
 
 static int send_response(const struct device *dev, struct tee_supp_msg *rsp)
@@ -77,10 +168,10 @@ static void uuid_from_param(TEEC_UUID *d, const uint64_t a, const uint64_t b)
 static int load_ta(uint32_t num_params, struct tee_param *params)
 {
 	int ta_found = 0;
-	size_t size = 0;
-	TEEC_UUID uuid = { 0 };
-	struct tee_shm *shm;
 	void *addr;
+	size_t size = 0;
+	size_t buf_size = 0;
+	TEEC_UUID uuid = { 0 };
 
 	if (num_params != 2) {
 		return TEEC_ERROR_BAD_PARAMETERS;
@@ -91,16 +182,10 @@ static int load_ta(uint32_t num_params, struct tee_param *params)
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	shm = (struct tee_shm *)params[1].c;
 	uuid_from_param(&uuid, params[0].a, params[0].b);
 
-	if (shm) {
-		size = shm->size;
-		addr = shm->addr;
-	} else {
-		size = 0;
-		addr = NULL;
-	}
+	addr = tee_param_get_mem(params + 1, &buf_size);
+	size = buf_size;
 
 	ta_found = TEECI_LoadSecureModule(&uuid, addr, &size);
 	if (ta_found != TA_BINARY_FOUND) {
@@ -108,13 +193,13 @@ static int load_ta(uint32_t num_params, struct tee_param *params)
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
 
-	MEMREF_SIZE(params + 1) = size;
+	SET_MEMREF_SIZE(params + 1, size);
 
 	/*
 	 * If a buffer wasn't provided, just tell which size it should be.
 	 * If it was provided but isn't big enough, report an error.
 	 */
-	if (addr && size > (shm ? shm->size : 0)) {
+	if (addr && size > buf_size) {
 		return TEEC_ERROR_SHORT_BUFFER;
 	}
 
@@ -126,6 +211,7 @@ static int shm_alloc(const struct device *dev, uint32_t num_params,
 {
 	void *addr;
 	size_t size;
+	struct suppl_shm *shm;
 
 	if (num_params != 1) {
 		return TEEC_ERROR_BAD_PARAMETERS;
@@ -135,7 +221,7 @@ static int shm_alloc(const struct device *dev, uint32_t num_params,
 	case TEE_PARAM_ATTR_TYPE_VALUE_INPUT:
 	case TEE_PARAM_ATTR_TYPE_VALUE_OUTPUT:
 	case TEE_PARAM_ATTR_TYPE_VALUE_INOUT:
-		size = params[0].b;
+		size = MEMREF_SIZE(params);
 		break;
 	default:
 		return TEEC_ERROR_BAD_PARAMETERS;
@@ -150,14 +236,24 @@ static int shm_alloc(const struct device *dev, uint32_t num_params,
 		return TEEC_ERROR_OUT_OF_MEMORY;
 	}
 
-	params[0].c = (uint64_t)addr;
+	shm = k_malloc(sizeof(struct suppl_shm));
+	if (!shm) {
+		k_free(addr);
+		return TEEC_ERROR_OUT_OF_MEMORY;
+	}
+	shm->p = addr;
+	shm->id = (uint64_t)addr;
+	shm->size = size;
+	append_shm(shm);
 
+	SET_MEMREF_SHM_ID(params, shm->id);
 	return TEEC_SUCCESS;
 }
 
 static int shm_free(uint32_t num_params, struct tee_param *params)
 {
-	struct tee_shm *shm = NULL;
+	uint64_t id;
+	struct suppl_shm *shm = NULL;
 
 	if (num_params != 1) {
 		return TEEC_ERROR_BAD_PARAMETERS;
@@ -167,17 +263,18 @@ static int shm_free(uint32_t num_params, struct tee_param *params)
 	case TEE_PARAM_ATTR_TYPE_VALUE_INPUT:
 	case TEE_PARAM_ATTR_TYPE_VALUE_OUTPUT:
 	case TEE_PARAM_ATTR_TYPE_VALUE_INOUT:
-		shm = (struct tee_shm *)params[0].b;
+		id = params[0].b;
 		break;
 	default:
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	if (!shm || !shm->addr) {
+	shm = remove_shm(id);
+	if (!shm) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	k_free(shm->addr);
+	k_free(shm->p);
+	k_free(shm);
 	return TEEC_SUCCESS;
 }
 
@@ -239,6 +336,8 @@ static int tee_supp_init(const struct device *dev)
 		LOG_ERR("No TrustZone device found!");
 		return -ENODEV;
 	}
+
+	sys_dlist_init(&shm_list);
 
 	k_thread_create(&main_thread, main_stack, K_THREAD_STACK_SIZEOF(main_stack), tee_supp_main,
 			(void *) tee_dev, NULL, NULL, TEE_SUPP_THREAD_PRIO, 0, K_NO_WAIT);
