@@ -11,6 +11,7 @@
 #include <string.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/fdtable.h>
+#include "tee_supplicant.h"
 
 LOG_MODULE_REGISTER(ree_fs);
 
@@ -23,7 +24,6 @@ LOG_MODULE_REGISTER(ree_fs);
 static int tee_fs_open(size_t num_params, struct tee_param *params,
 		       fs_mode_t flags)
 {
-	struct tee_shm *shm;
 	char *name, path[REE_FS_PATH_MAX] = REE_FS_MP;
 	struct fs_file_t *file;
 	int fd, rc = TEEC_ERROR_GENERIC;
@@ -41,14 +41,10 @@ static int tee_fs_open(size_t num_params, struct tee_param *params,
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	/*TODO do all safety checks */
-	shm = (struct tee_shm *)params[1].c;
-
-	if (!shm || !shm->addr) {
+	name = tee_param_get_mem(params + 1, NULL);
+	if (!name) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	name = shm->addr;
 	strncat(path, name, PATH_MAX);
 
 	file = k_malloc(sizeof(*file));
@@ -121,7 +117,6 @@ static int tee_fs_read(size_t num_params, struct tee_param *params)
 	off_t offset;
 	size_t len;
 	ssize_t sz;
-	struct tee_shm *shm;
 	struct fs_file_t *file;
 	void *buf;
 
@@ -144,15 +139,11 @@ static int tee_fs_read(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
 
-	/*TODO do all safety checks */
-	shm = (struct tee_shm *)params[1].c;
-	len = params[1].b;
-
-	if (!shm || !shm->addr) {
+	buf = tee_param_get_mem(params + 1, NULL);
+	if (!buf) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	buf = shm->addr;
+	len = MEMREF_SIZE(params + 1);
 	rc = fs_seek(file, offset, SEEK_SET);
 	if (rc < 0) {
 		LOG_ERR("invalid offset %ld (%d)", offset, rc);
@@ -166,7 +157,7 @@ static int tee_fs_read(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_GENERIC;
 	}
 
-	params[1].b = sz;
+	SET_MEMREF_SIZE(params + 1, sz);
 	return TEEC_SUCCESS;
 }
 
@@ -176,7 +167,6 @@ static int tee_fs_write(size_t num_params, struct tee_param *params)
 	off_t offset;
 	size_t len;
 	ssize_t sz;
-	struct tee_shm *shm;
 	struct fs_file_t *file;
 	void *buf;
 
@@ -199,15 +189,11 @@ static int tee_fs_write(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
 
-	/*TODO do all safety checks */
-	shm = (struct tee_shm *)params[1].c;
-	len = params[1].b;
-
-	if (!shm || !shm->addr) {
+	buf = tee_param_get_mem(params + 1, NULL);
+	if (!buf) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	buf = shm->addr;
+	len = MEMREF_SIZE(params + 1);
 	rc = fs_seek(file, offset, SEEK_SET);
 	if (rc < 0) {
 		LOG_ERR("invalid offset %ld (%d)", offset, rc);
@@ -221,7 +207,7 @@ static int tee_fs_write(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_GENERIC;
 	}
 
-	params[1].b = sz;
+	SET_MEMREF_SIZE(params + 1, sz);
 	return TEEC_SUCCESS;
 }
 
@@ -255,7 +241,6 @@ static int tee_fs_truncate(size_t num_params, struct tee_param *params)
 
 static int tee_fs_remove(size_t num_params, struct tee_param *params)
 {
-	struct tee_shm *shm;
 	char *name, path[REE_FS_PATH_MAX] = REE_FS_MP;
 	int rc;
 
@@ -270,14 +255,10 @@ static int tee_fs_remove(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	/*TODO do all safety checks */
-	shm = (struct tee_shm *)params[1].c;
-
-	if (!shm || !shm->addr) {
+	name = tee_param_get_mem(params + 1, NULL);
+	if (!name) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	name = shm->addr;
 	strncat(path, name, PATH_MAX);
 
 	rc = fs_unlink(path);
@@ -297,7 +278,6 @@ static int tee_fs_rename(size_t num_params, struct tee_param *params)
 {
 	char *name, path[REE_FS_PATH_MAX] = REE_FS_MP;
 	char *new_name, new_path[REE_FS_PATH_MAX] = REE_FS_MP;
-	struct tee_shm *shm;
 	int rc;
 
 	if (num_params != 3) {
@@ -313,23 +293,16 @@ static int tee_fs_rename(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	/*TODO do all safety checks */
-	shm = (struct tee_shm *)params[1].c;
-
-	if (!shm || !shm->addr) {
+	name = tee_param_get_mem(params + 1, NULL);
+	if (!name) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	name = shm->addr;
 	strncat(path, name, PATH_MAX);
 
-	shm = (struct tee_shm *)params[2].c;
-
-	if (!shm || !shm->addr) {
+	new_name = tee_param_get_mem(params + 2, NULL);
+	if (!new_name) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	new_name = shm->addr;
 	strncat(new_path, new_name, PATH_MAX);
 
 	/* overwrite flag */
@@ -353,7 +326,6 @@ static int tee_fs_rename(size_t num_params, struct tee_param *params)
 
 static int tee_fs_opendir(size_t num_params, struct tee_param *params)
 {
-	struct tee_shm *shm;
 	char *name, path[REE_FS_PATH_MAX] = REE_FS_MP;
 	struct fs_dir_t *dir;
 	int rc;
@@ -371,14 +343,10 @@ static int tee_fs_opendir(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	/*TODO do all safety checks */
-	shm = (struct tee_shm *)params[1].c;
-
-	if (!shm || !shm->addr) {
+	name = tee_param_get_mem(params + 1, NULL);
+	if (!name) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
-
-	name = shm->addr;
 	strncat(path, name, PATH_MAX);
 
 	dir = k_malloc(sizeof(*dir));
@@ -428,11 +396,11 @@ static int tee_fs_closedir(size_t num_params, struct tee_param *params)
 
 static int tee_fs_readdir(size_t num_params, struct tee_param *params)
 {
-	struct tee_shm *shm;
 	struct fs_dirent entry;
 	struct fs_dir_t *dir;
-	size_t len;
+	size_t len, size;
 	int rc;
+	char *buf;
 
 	if (num_params != 2) {
 		return TEEC_ERROR_BAD_PARAMETERS;
@@ -445,15 +413,13 @@ static int tee_fs_readdir(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	/*TODO do all safety checks */
 	dir = (struct fs_dir_t *)params[0].b;
-	shm = (struct tee_shm *)params[1].c;
-
-	if (!dir || !shm || !shm->addr) {
+	buf = tee_param_get_mem(params + 1, &size);
+	if (!dir || !buf) {
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	if (params[1].b != shm->size) {
+	if (params[1].b != size) {
 		LOG_WRN("memref size not match shm size");
 	}
 
@@ -468,11 +434,11 @@ static int tee_fs_readdir(size_t num_params, struct tee_param *params)
 	}
 
 	len = strlen(entry.name) + 1;
-	if (shm->size < len) {
+	if (size < len) {
 		return TEEC_ERROR_SHORT_BUFFER;
 	}
 
-	memcpy(shm->addr, entry.name, len);
+	memcpy(buf, entry.name, len);
 	return TEEC_SUCCESS;
 }
 
@@ -517,5 +483,3 @@ int tee_fs(uint32_t num_params, struct tee_param *params)
 
 	return TEEC_ERROR_BAD_PARAMETERS;
 }
-
-

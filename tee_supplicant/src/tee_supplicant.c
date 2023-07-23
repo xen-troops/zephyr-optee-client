@@ -29,13 +29,6 @@ static K_THREAD_STACK_DEFINE(main_stack, 8192);
 static sys_dlist_t shm_list;
 static K_MUTEX_DEFINE(shm_mutex);
 
-/* Helpers to access memref parts of a struct tee_param */
-#define MEMREF_SHM_ID(p)          ((p)->c)
-#define MEMREF_SHM_OFFS(p)        ((p)->a)
-#define MEMREF_SIZE(p)            ((p)->b)
-#define SET_MEMREF_SHM_ID(p, v)   ((p)->c = (v))
-#define SET_MEMREF_SIZE(p, v)     ((p)->b = (v))
-
 struct tee_supp_msg {
 	uint32_t cmd_ret;
 	uint32_t num_param;
