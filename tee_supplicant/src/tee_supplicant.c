@@ -220,7 +220,6 @@ static int shm_alloc(const struct device *dev, uint32_t num_params,
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
-	/*TODO: check for TEE_GEN_CAP_REG_MEM */
 	/*TODO: page-aligned allocation may not be required here, also we'd
 	 * better double check what alignment optee wants
 	 */
@@ -324,6 +323,7 @@ static void tee_supp_main(void *p1, void *p2, void *p3)
 static int tee_supp_init(const struct device *dev)
 {
 	const struct device *tee_dev = DEVICE_DT_GET_ONE(linaro_optee_tz);
+	struct tee_version_info info = { 0 };
 
 	if (!tee_dev) {
 		LOG_ERR("No TrustZone device found!");
@@ -331,6 +331,15 @@ static int tee_supp_init(const struct device *dev)
 	}
 
 	sys_dlist_init(&shm_list);
+
+	if (tee_get_version(tee_dev, &info)) {
+		LOG_ERR("Unable to allocate thread argument");
+		return -EINVAL;
+	}
+	if (!(info.gen_caps & TEE_GEN_CAP_REG_MEM)) {
+		LOG_ERR("Only shared memory registration supported");
+		return -EINVAL;
+	}
 
 	k_thread_create(&main_thread, main_stack, K_THREAD_STACK_SIZEOF(main_stack), tee_supp_main,
 			(void *) tee_dev, NULL, NULL, TEE_SUPP_THREAD_PRIO, 0, K_NO_WAIT);
