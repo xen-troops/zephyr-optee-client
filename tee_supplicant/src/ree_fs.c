@@ -168,9 +168,9 @@ static int tee_fs_read(size_t num_params, struct tee_param *params)
 	int fd, rc;
 	off_t offset;
 	size_t len;
-	ssize_t sz;
+	ssize_t sz, s;
 	struct fs_file_t *file;
-	void *buf;
+	uint8_t *buf;
 
 	if (num_params != 2) {
 		return TEEC_ERROR_BAD_PARAMETERS;
@@ -196,17 +196,24 @@ static int tee_fs_read(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 	len = MEMREF_SIZE(params + 1);
+	sz = 0;
 	rc = fs_seek(file, offset, SEEK_SET);
 	if (rc < 0) {
 		LOG_ERR("invalid offset %ld (%d)", offset, rc);
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
-
-	/*TODO: handle sz < len */
-	sz = fs_read(file, buf, len);
-	if (sz < 0) {
-		LOG_ERR("read failure (%ld)", sz);
-		return TEEC_ERROR_GENERIC;
+	while (len > 0) {
+		s = fs_read(file, buf, len);
+		if (s < 0) {
+			LOG_ERR("read failure (%ld)", s);
+			return TEEC_ERROR_GENERIC;
+		}
+		if (!s) {
+			break;
+		}
+		sz += s;
+		len -= s;
+		buf += s;
 	}
 
 	SET_MEMREF_SIZE(params + 1, sz);
@@ -218,9 +225,9 @@ static int tee_fs_write(size_t num_params, struct tee_param *params)
 	int fd, rc;
 	off_t offset;
 	size_t len;
-	ssize_t sz;
+	ssize_t sz, s;
 	struct fs_file_t *file;
-	void *buf;
+	uint8_t *buf;
 
 	if (num_params != 2) {
 		return TEEC_ERROR_BAD_PARAMETERS;
@@ -246,17 +253,24 @@ static int tee_fs_write(size_t num_params, struct tee_param *params)
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 	len = MEMREF_SIZE(params + 1);
+	sz = 0;
 	rc = fs_seek(file, offset, SEEK_SET);
 	if (rc < 0) {
 		LOG_ERR("invalid offset %ld (%d)", offset, rc);
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
-
-	/*TODO: handle case of partially written buffer */
-	sz = fs_write(file, buf, len);
-	if (sz < 0) {
-		LOG_ERR("write failure (%ld)", sz);
-		return TEEC_ERROR_GENERIC;
+	while (len > 0) {
+		s = fs_write(file, buf, len);
+		if (s < 0) {
+			LOG_ERR("write failure (%ld)", s);
+			return TEEC_ERROR_GENERIC;
+		}
+		if (!s) {
+			break;
+		}
+		sz += s;
+		len -= s;
+		buf += s;
 	}
 
 	SET_MEMREF_SIZE(params + 1, sz);
