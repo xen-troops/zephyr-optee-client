@@ -585,7 +585,6 @@ TEEC_Result TEEC_OpenSession(TEEC_Context *ctx, TEEC_Session *session,
 
 	res = teec_pre_process_operation(ctx, operation, params, shm);
 	if (res != TEEC_SUCCESS) {
-		printk("Line %d res = %d\n", __LINE__, res);
 		eorig = TEEC_ORIGIN_API;
 		goto out_free_temp_refs;
 	}
