@@ -406,4 +406,11 @@ static int tee_supp_init(const struct device *dev)
 	return 0;
 }
 
+#ifdef CONFIG_OPTEE_TEE_SUPPLICANT_AUTOINIT
 SYS_INIT(tee_supp_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
+#else
+int TEE_SupplicantInit(void)
+{
+	return tee_supp_init(NULL);
+}
+#endif
