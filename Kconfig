@@ -48,6 +48,16 @@ config OPTEE_STORAGE_ROOT
 	  files. This directory should be existent and file system
 	  mounted.
 
+config OPTEE_TEE_SUPPLICANT_AUTOINIT
+	bool "TEE Supplicant auto init"
+	default y
+	depends on OPTEE_TEE_SUPPLICANT
+	help
+	  tee_supplicant will be initialized automatically during system
+	  initialization. Turn this option off if you need initialize
+	  tee_supplicant manually for example if volume with secure
+	  storage mounted by application.
+
 config OPTEE_LIBSETEEC
 	bool "Enable libseteec"
 	depends on OPTEE_LIBTEEC
