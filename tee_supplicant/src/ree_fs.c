@@ -14,9 +14,7 @@
 
 LOG_MODULE_REGISTER(ree_fs);
 
-/* where FS gets mounted */
-/*TODO: make it in sync with DTS fstab */
-#define REE_FS_MP "/tee"
+#define REE_FS_MP CONFIG_OPTEE_STORAGE_ROOT
 #define REE_FS_PATHLEN sizeof(REE_FS_MP)
 #define REE_FS_PATH_MAX (PATH_MAX + REE_FS_PATHLEN)
 
