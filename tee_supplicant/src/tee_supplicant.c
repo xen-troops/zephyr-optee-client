@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023 EPAM Systems
+ * Copyright (c) 2024 EPAM Systems
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -9,6 +9,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/dlist.h>
+#include <zephyr/fs/fs.h>
 
 #include <optee_msg_supplicant.h>
 #include <tee_client_api.h>
@@ -320,10 +321,61 @@ static void tee_supp_main(void *p1, void *p2, void *p3)
 	}
 }
 
+static char *_strdup(const char *str)
+{
+	int len;
+	char *s;
+
+	len = strlen(str) + 1;
+	s = k_malloc(len);
+	if (s) {
+		strcpy(s, str);
+	}
+	return s;
+}
+
+static int do_mkdir(const char *path)
+{
+	int rc;
+
+	rc = fs_mkdir(path);
+	if (rc == -EEXIST) {
+		rc = 0;
+	}
+
+	return rc;
+}
+
+static int mkpath(const char *path)
+{
+	int status = 0;
+	char *subpath = _strdup(path);
+	char *prev = subpath;
+	char *curr = NULL;
+
+	if (!subpath) {
+		return -ENOMEM;
+	}
+	while (status == 0 && (curr = strchr(prev, '/')) != 0) {
+		if (curr != prev) {
+			*curr = '\0';
+			status = do_mkdir(subpath);
+			*curr = '/';
+		}
+		prev = curr + 1;
+	}
+	if (status == 0) {
+		status = do_mkdir(path);
+	}
+	k_free(subpath);
+	return status;
+}
+
 static int tee_supp_init(const struct device *dev)
 {
 	const struct device *tee_dev = DEVICE_DT_GET_ONE(linaro_optee_tz);
 	struct tee_version_info info = { 0 };
+	int rc;
 
 	if (!tee_dev) {
 		LOG_ERR("No TrustZone device found!");
@@ -339,6 +391,12 @@ static int tee_supp_init(const struct device *dev)
 	if (!(info.gen_caps & TEE_GEN_CAP_REG_MEM)) {
 		LOG_ERR("Only shared memory registration supported");
 		return -EINVAL;
+	}
+
+	rc = mkpath(CONFIG_OPTEE_STORAGE_ROOT);
+	if (rc != 0) {
+		LOG_ERR("Prepare secure storage failed %d", rc);
+		return rc;
 	}
 
 	k_thread_create(&main_thread, main_stack, K_THREAD_STACK_SIZEOF(main_stack), tee_supp_main,
