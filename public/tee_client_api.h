@@ -274,6 +274,11 @@ typedef struct {
 } TEEC_UUID;
 
 /**
+ * Invalid shared memory identifier for TEEC_SharedMemory id field.
+ */
+#define TEEC_SHM_INVALID_ID (~0)
+
+/**
  * struct TEEC_SharedMemory - Memory to transfer data between a client
  * application and trusted code.
  *
@@ -297,7 +302,7 @@ typedef struct {
 	/*
 	 * Implementation-Defined
 	 */
-	int id;
+	uint64_t id;
 	size_t alloced_size;
 	void *shadow_buffer;
 	struct tee_shm *registered_shm;
