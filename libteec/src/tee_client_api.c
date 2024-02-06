@@ -190,7 +190,7 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 		if (ctx->memref_null) {
 			/* Null pointer, indicate no shared memory attached */
 			MEMREF_SHM_ID(param) = TEE_MEMREF_NULL;
-			shm->id = -1;
+			shm->id = TEEC_SHM_INVALID_ID;
 		} else {
 			res = TEEC_AllocateSharedMemory(ctx, shm);
 			if (res != TEEC_SUCCESS)
@@ -800,7 +800,7 @@ TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 		shm->buffer = teec_shm_alloc(ctx->dev, s, 0);
 
 		if (!shm->buffer) {
-			shm->id = -1;
+			shm->id = TEEC_SHM_INVALID_ID;
 			return TEEC_ERROR_OUT_OF_MEMORY;
 		}
 		shm->registered_shm = NULL;
@@ -814,7 +814,7 @@ TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 
 void TEEC_ReleaseSharedMemory(TEEC_SharedMemory *shm)
 {
-	if (!shm || shm->id == -1 || !shm->dev)
+	if (!shm || shm->id == TEEC_SHM_INVALID_ID || !shm->dev)
 		return;
 
 	if (shm->shadow_buffer) {
@@ -833,7 +833,7 @@ void TEEC_ReleaseSharedMemory(TEEC_SharedMemory *shm)
 		tee_shm_unregister(shm->dev, shm->registered_shm);
 	}
 
-	shm->id = -1;
+	shm->id = TEEC_SHM_INVALID_ID;
 	shm->shadow_buffer = NULL;
 	shm->buffer = NULL;
 	shm->registered_shm = NULL;
