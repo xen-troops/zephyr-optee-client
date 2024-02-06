@@ -39,6 +39,15 @@ config OPTEE_TEE_SUPPLICANT
 	  applications from application and perform file system operation
 	  on non-volatile memory devices which inaccessible from OP-TEE
 
+config OPTEE_STORAGE_ROOT
+	string "Storage root directory"
+	default "/tee"
+	depends on OPTEE_TEE_SUPPLICANT
+	help
+	  tee_supplicant needs directory where it will keep temporary
+	  files. This directory should be existent and file system
+	  mounted.
+
 config OPTEE_LIBSETEEC
 	bool "Enable libseteec"
 	depends on OPTEE_LIBTEEC
