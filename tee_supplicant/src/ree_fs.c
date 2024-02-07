@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /*
- * Copyright (c) 2023 EPAM Systems
+ * Copyright (c) 2024 EPAM Systems
  *
  */
-
 
 #include <optee_msg_supplicant.h>
 #include <ree_fs.h>
@@ -20,6 +19,69 @@ LOG_MODULE_REGISTER(ree_fs);
 #define REE_FS_MP "/tee"
 #define REE_FS_PATHLEN sizeof(REE_FS_MP)
 #define REE_FS_PATH_MAX (PATH_MAX + REE_FS_PATHLEN)
+
+#define MAX_FILES		20
+
+static struct fs_file_t *files[MAX_FILES] = {0};
+K_MUTEX_DEFINE(file_mutex);
+
+static struct fs_file_t *find_fd(int fd)
+{
+	struct fs_file_t *file;
+
+	if (fd < 0 || fd >= MAX_FILES) {
+		return NULL;
+	}
+
+	k_mutex_lock(&file_mutex, K_FOREVER);
+	file = files[fd];
+	k_mutex_unlock(&file_mutex);
+	return file;
+}
+
+static void remove_fd(int fd)
+{
+	struct fs_file_t *file;
+
+	if (fd < 0 || fd >= MAX_FILES) {
+		return;
+	}
+	k_mutex_lock(&file_mutex, K_FOREVER);
+	file = files[fd];
+	if (file) {
+		k_free(file);
+	}
+	files[fd] = NULL;
+	k_mutex_unlock(&file_mutex);
+}
+
+static int new_fd(struct fs_file_t **file)
+{
+	int fd;
+
+	if (!file) {
+		return -EINVAL;
+	}
+
+	*file = k_malloc(sizeof(struct fs_file_t));
+	if (!(*file)) {
+		return -ENOMEM;
+	}
+
+	k_mutex_lock(&file_mutex, K_FOREVER);
+	fs_file_t_init(*file);
+	for (fd = 0; fd < MAX_FILES; fd++) {
+		if (!files[fd]) {
+			files[fd] = *file;
+			k_mutex_unlock(&file_mutex);
+			return fd;
+		}
+	}
+	k_mutex_unlock(&file_mutex);
+	k_free(*file);
+
+	return -EMFILE;
+}
 
 static int tee_fs_open(size_t num_params, struct tee_param *params,
 		       fs_mode_t flags)
@@ -47,13 +109,7 @@ static int tee_fs_open(size_t num_params, struct tee_param *params,
 	}
 	strncat(path, name, PATH_MAX);
 
-	file = k_malloc(sizeof(*file));
-	if (!file) {
-		return TEEC_ERROR_GENERIC;
-	}
-
-	fs_file_t_init(file);
-	fd = z_alloc_fd(file, NULL);
+	fd = new_fd(&file);
 	if (fd < 0) {
 		rc = TEEC_ERROR_GENERIC;
 		goto free;
@@ -75,9 +131,8 @@ static int tee_fs_open(size_t num_params, struct tee_param *params,
 	return TEEC_SUCCESS;
 free:
 	if (fd >= 0) {
-		z_free_fd(fd);
+		remove_fd(fd);
 	}
-	k_free(file);
 	return rc;
 }
 
@@ -93,15 +148,14 @@ static int tee_fs_close(size_t num_params, struct tee_param *params)
 
 	fd = params[0].b;
 
-	file = z_get_fd_obj(fd, NULL, 0);
+	file = find_fd(fd);
 	if (!file) {
 		LOG_ERR("fd %d not found", fd);
 		return TEEC_ERROR_BAD_PARAMETERS;
 	}
 
 	rc = fs_close(file);
-	z_free_fd(fd);
-	k_free(file);
+	remove_fd(fd);
 
 	if (rc < 0) {
 		LOG_ERR("failed to close file (%d)", rc);
@@ -134,7 +188,7 @@ static int tee_fs_read(size_t num_params, struct tee_param *params)
 	fd = params[0].b;
 	offset = params[0].c;
 
-	file = z_get_fd_obj(fd, NULL, 0);
+	file = find_fd(fd);
 	if (!file) {
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
@@ -184,7 +238,7 @@ static int tee_fs_write(size_t num_params, struct tee_param *params)
 	fd = params[0].b;
 	offset = params[0].c;
 
-	file = z_get_fd_obj(fd, NULL, 0);
+	file = find_fd(fd);
 	if (!file) {
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
@@ -225,7 +279,7 @@ static int tee_fs_truncate(size_t num_params, struct tee_param *params)
 	fd = params[0].b;
 	len = params[0].c;
 
-	file = z_get_fd_obj(fd, NULL, 0);
+	file = find_fd(fd);
 	if (!file) {
 		return TEEC_ERROR_ITEM_NOT_FOUND;
 	}
