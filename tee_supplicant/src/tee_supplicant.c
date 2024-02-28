@@ -375,7 +375,7 @@ static int mkpath(const char *path)
 	return status;
 }
 
-static int tee_supp_init(const struct device *dev)
+static int tee_supp_init(void)
 {
 	const struct device *tee_dev = DEVICE_DT_GET_ONE(linaro_optee_tz);
 	struct tee_version_info info = { 0 };
@@ -415,6 +415,6 @@ SYS_INIT(tee_supp_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 #else
 int TEE_SupplicantInit(void)
 {
-	return tee_supp_init(NULL);
+	return tee_supp_init();
 }
 #endif
