@@ -3,6 +3,9 @@
  * Copyright (c) 2017-2020, Linaro Limited
  */
 
+#undef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200809L
+
 #include <ck_debug.h>
 #include <pkcs11.h>
 #include <pkcs11_ta.h>
