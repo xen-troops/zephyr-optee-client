@@ -375,7 +375,7 @@ static int mkpath(const char *path)
 	return status;
 }
 
-static int tee_supp_init(const struct device *dev)
+static int tee_supp_init(void)
 {
 	const struct device *tee_dev = DEVICE_DT_GET_ONE(linaro_optee_tz);
 	struct tee_version_info info = { 0 };
