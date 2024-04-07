@@ -271,7 +271,7 @@ static int shm_free(uint32_t num_params, struct tee_param *params)
 	return TEEC_SUCCESS;
 }
 
-static int process_request(const struct device *dev)
+static int process_request(const struct device *dev, bool fs_init)
 {
 	int rc;
 	struct tee_supp_msg ts_msg = {
@@ -289,7 +289,11 @@ static int process_request(const struct device *dev)
 		rc = load_ta(ts_msg.num_param, ts_msg.params);
 		break;
 	case OPTEE_MSG_RPC_CMD_FS:
-		rc = tee_fs(ts_msg.num_param, ts_msg.params);
+		if (fs_init) {
+			rc = tee_fs(ts_msg.num_param, ts_msg.params);
+		} else {
+			rc = TEEC_ERROR_STORAGE_NOT_AVAILABLE;
+		}
 		break;
 	case OPTEE_MSG_RPC_CMD_SHM_ALLOC:
 		rc = shm_alloc(dev, ts_msg.num_param, ts_msg.params);
@@ -307,14 +311,14 @@ static int process_request(const struct device *dev)
 
 static void tee_supp_main(void *p1, void *p2, void *p3)
 {
-	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 	const struct device *dev = p1;
 	int rc = 0;
+	bool fs_init = p2 ? false : true;
 
 	/* TODO: implement terminating supplicant's thread */
 	while (1) {
-		rc = process_request(dev);
+		rc = process_request(dev, fs_init);
 		if (rc) {
 			LOG_ERR("Failed to process request, rc = %d", rc);
 		}
@@ -396,14 +400,14 @@ static int tee_supp_init(const struct device *dev)
 	rc = mkpath(CONFIG_OPTEE_STORAGE_ROOT);
 	if (rc != 0) {
 		LOG_ERR("Prepare secure storage failed %d", rc);
-		return rc;
 	}
 
 	k_thread_create(&main_thread, main_stack, K_THREAD_STACK_SIZEOF(main_stack), tee_supp_main,
-			(void *) tee_dev, NULL, NULL, TEE_SUPP_THREAD_PRIO, 0, K_NO_WAIT);
+			(void *) tee_dev, (void *)(size_t)rc, NULL,
+			TEE_SUPP_THREAD_PRIO, 0, K_NO_WAIT);
 
 	LOG_INF("Started tee_supplicant thread");
-	return 0;
+	return rc;
 }
 
 #ifdef CONFIG_OPTEE_TEE_SUPPLICANT_AUTOINIT
