@@ -385,7 +385,7 @@ static int tee_supp_init(const struct device *dev)
 	sys_dlist_init(&shm_list);
 
 	if (tee_get_version(tee_dev, &info)) {
-		LOG_ERR("Unable to allocate thread argument");
+		LOG_ERR("Unable to retrieve tee capabilities");
 		return -EINVAL;
 	}
 	if (!(info.gen_caps & TEE_GEN_CAP_REG_MEM)) {
