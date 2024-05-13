@@ -415,6 +415,6 @@ SYS_INIT(tee_supp_init, APPLICATION, CONFIG_KERNEL_INIT_PRIORITY_DEFAULT);
 #else
 int TEE_SupplicantInit(void)
 {
-	return tee_supp_init(NULL);
+	return tee_supp_init();
 }
 #endif
