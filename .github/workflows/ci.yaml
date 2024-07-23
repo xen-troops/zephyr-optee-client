@@ -1,0 +1,44 @@
+name: CI
+on: [push, pull_request]
+permissions:
+  contents: read # to fetch code (actions/checkout)
+jobs:
+  test:
+    name: make check (QEMUv8)
+    runs-on: ubuntu-latest
+    container: xentroops/zephyr-optee-ci:v1
+    steps:
+      - name: Remove /__t/*
+        run: rm -rf /__t/*
+      - name: Restore build cache
+        uses: actions/cache@v3
+        with:
+          path: /github/home/.cache/ccache
+          key: qemuv8_check-cache-${{ github.sha }}
+          restore-keys: |
+            qemuv8_check-cache-
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Update Git config
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+      - shell: bash
+        run: |
+          # make check task
+          set -e -v
+          export LC_ALL=C
+          export BR2_CCACHE_DIR=/github/home/.cache/ccache
+          export FORCE_UNSAFE_CONFIGURE=1 # Prevent Buildroot error when building as root
+          export CFG_TEE_CORE_LOG_LEVEL=0
+          export CFG_ATTESTATION_PTA=y
+          export CFG_ATTESTATION_PTA_KEY_SIZE=1024
+          REPO_TO_TEST=$(pwd)
+          TOP=/root/optee_repo_qemu_v8
+          ORIGINAL_REPO=${TOP}/zephyr-optee/zephyr-optee-client
+          cd /root/
+          /root/get_optee_qemuv8.sh
+          /root/get_zephyr.sh
+          rm -rf ${ORIGINAL_REPO}
+          ln -s ${REPO_TO_TEST} ${ORIGINAL_REPO}
+          cd ${TOP}/build
+
+          make -j$(nproc) check ZEPHYR=y RUST_ENABLE=n
