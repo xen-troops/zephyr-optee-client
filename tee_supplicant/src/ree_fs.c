@@ -198,6 +198,16 @@ static int tee_fs_read(size_t num_params, struct tee_param *params)
 	len = MEMREF_SIZE(params + 1);
 	sz = 0;
 	rc = fs_seek(file, offset, SEEK_SET);
+	if (rc == -EINVAL) {
+		/*
+		 * OP-TEE tries to seek past the end of file. POSIX
+		 * allows this, but Zephyr - does not. POSIX in such
+		 * case just returns 0 for the read operation, we will
+		 * do the same.
+		 */
+		SET_MEMREF_SIZE(params + 1, 0);
+		return TEEC_SUCCESS;
+	}
 	if (rc < 0) {
 		LOG_ERR("invalid offset %ld (%d)", offset, rc);
 		return TEEC_ERROR_ITEM_NOT_FOUND;
@@ -255,6 +265,41 @@ static int tee_fs_write(size_t num_params, struct tee_param *params)
 	len = MEMREF_SIZE(params + 1);
 	sz = 0;
 	rc = fs_seek(file, offset, SEEK_SET);
+	if (rc == -EINVAL) {
+		/*
+		 * OP-TEE tries to seek past the end of file. POSIX
+		 * allows this, but Zephyr - does not. We need to fill
+		 * the file with zeroes to the desired position.
+		 */
+		off_t cur_offset;
+		char zero_buf[8];
+
+		memset(zero_buf, 0, sizeof(zero_buf));
+		rc = fs_seek(file, 0, SEEK_END);
+		if (rc < 0) {
+			LOG_ERR("Failed to seek to the end of file (%d)", rc);
+			return TEEC_ERROR_GENERIC;
+		}
+
+		cur_offset = fs_tell(file);
+		if (cur_offset < 0) {
+			LOG_ERR("Failed to get file position (%ld)", cur_offset);
+			return TEEC_ERROR_GENERIC;
+		}
+
+		while (cur_offset < offset) {
+			size_t to_write = MIN(offset - cur_offset,
+					      sizeof(zero_buf));
+			rc = fs_write(file, zero_buf, to_write);
+			if (rc < 0) {
+				LOG_ERR("Failed to extend file (%d)", rc);
+				return TEEC_ERROR_GENERIC;
+			}
+			cur_offset += rc;
+		}
+
+		rc = 0;
+	}
 	if (rc < 0) {
 		LOG_ERR("invalid offset %ld (%d)", offset, rc);
 		return TEEC_ERROR_ITEM_NOT_FOUND;
