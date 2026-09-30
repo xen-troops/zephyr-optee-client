@@ -165,6 +165,7 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 			TEEC_SharedMemory *shm)
 {
 	TEEC_Result res = TEEC_ERROR_GENERIC;
+	void *shadow = NULL;
 
 	switch (param_type) {
 		case TEEC_MEMREF_TEMP_INPUT:
@@ -199,13 +200,29 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 			MEMREF_SHM_ID(param) = shm->id;
 		}
 	} else {
-		shm->buffer = tmpref->buffer;
-		res = TEEC_RegisterSharedMemory(ctx, shm);
-		if (res != TEEC_SUCCESS)
-			return res;
+		if (IS_ALIGNED(tmpref->buffer, TEE_CLIENT_PAGE_SIZE)) {
+			shm->buffer = tmpref->buffer;
+		} else {
+			shadow = teec_paged_aligned_alloc(tmpref->size);
+			LOG_DBG("buffer %p doesn't aligned, allocating shadow buffer %p",
+				tmpref->buffer, shadow);
+			if (!shadow)
+				return TEEC_ERROR_OUT_OF_MEMORY;
 
-		if (shm->shadow_buffer)
+			shm->buffer = shadow;
+		}
+		res = TEEC_RegisterSharedMemory(ctx, shm);
+		if (res != TEEC_SUCCESS){
+			if (shadow)
+				k_free(shadow);
+			return res;
+		}
+
+		if (shadow) {
+			shm->shadow_buffer = shadow;
+			shm->internal.flags = SHM_FLAG_SHADOW_BUFFER_ALLOCED;
 			memcpy(shm->shadow_buffer, tmpref->buffer, tmpref->size);
+		}
 
 		MEMREF_SHM_ID(param) = shm->id;
 	}
