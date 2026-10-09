@@ -31,22 +31,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/tee.h>
-#include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
 #include <tee_client_api_extensions.h>
 #include <tee_client_api.h>
-
-LOG_MODULE_REGISTER(tee_client_api);
 
 #ifndef __aligned
 #define __aligned(size) __attribute__((__aligned__(size)))
 #endif
 
 #include <tee.h>
-
-#define TEE_CLIENT_PAGE_SIZE 4096
 
 #define DT_COMPATIBLE linaro_optee_tz
 
@@ -64,78 +56,18 @@ LOG_MODULE_REGISTER(tee_client_api);
 #define SHM_FLAG_BUFFER_ALLOCED		(1u << 0)
 #define SHM_FLAG_SHADOW_BUFFER_ALLOCED	(1u << 1)
 
-static K_MUTEX_DEFINE(teec_mutex);
+#define TEE_CLIENT_PAGE_SIZE 4096
 
-static void teec_mutex_lock(struct k_mutex  *mu)
-{
-	k_mutex_lock(mu, K_FOREVER);
-}
+#define BIT(n)  (1UL << (n))
+#define TEE_GEN_CAP_GP		BIT(0) /* GlobalPlatform compliant TEE */
+#define TEE_GEN_CAP_PRIVILEGED	BIT(1) /* Privileged device (for supplicant) */
+#define TEE_GEN_CAP_REG_MEM	BIT(2) /* Supports registering shared memory */
+#define TEE_GEN_CAP_MEMREF_NULL BIT(3) /* Support NULL MemRef */
 
-static void teec_mutex_unlock(struct k_mutex  *mu)
-{
-	k_mutex_unlock(mu);
-}
+#define IS_ALIGNED(ptr, align) (((uintptr_t)(ptr)) % (align) == 0)
 
-static void *teec_paged_aligned_alloc(size_t sz)
-{
-	return k_aligned_alloc(TEE_CLIENT_PAGE_SIZE, sz);
-}
+#define MIN(x, y) (((x) < (y)) ? (x) : (y))
 
-static int teec_open_dev(struct device const **dev, const char *capabilities,
-			 uint32_t *gen_caps)
-{
-	struct tee_version_info info;
-	int ret;
-
-	memset(&info, 0, sizeof(info));
-	*dev = DEVICE_DT_GET_ONE(DT_COMPATIBLE);
-	ret = tee_get_version(*dev, &info);
-	if (ret) {
-		return -1;
-	}
-
-	/* We can only handle GP TEEs */
-	if (!(info.gen_caps & TEE_GEN_CAP_GP)) {
-		return -1;
-	}
-
-	if (capabilities) {
-		if (strcmp(capabilities, "optee-tz") == 0) {
-			if (info.impl_id != TEE_IMPL_ID_OPTEE) {
-				return -1;
-			}
-			if (!(info.impl_caps & TEE_OPTEE_CAP_TZ)) {
-				return -1;
-			}
-		} else {
-			/* Unrecognized capability requested */
-			return -1;
-		}
-	}
-
-	*gen_caps = info.gen_caps;
-	return 0;
-}
-
-static struct tee_shm *teec_shm_alloc(const struct device *dev, size_t size, uint32_t flags)
-{
-	struct tee_shm *p;
-	int ret;
-
-	ret = tee_shm_alloc(dev, size, flags, &p);
-	if (ret < 0)
-		return NULL;
-	return p;
-}
-
-static int teec_shm_register(const struct device *dev, void *buf, size_t size, uint32_t flags,
-			     struct tee_shm **shm)
-{
-	int ret;
-
-	ret = tee_shm_register(dev, buf, size, flags, shm);
-	return ret;
-}
 
 TEEC_Result TEEC_InitializeContext(const char *name, TEEC_Context *ctx)
 {
@@ -161,7 +93,7 @@ void TEEC_FinalizeContext(TEEC_Context *ctx)
 
 static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 			uint32_t param_type, TEEC_TempMemoryReference *tmpref,
-			struct tee_param *param,
+			struct teec_param *param,
 			TEEC_SharedMemory *shm)
 {
 	TEEC_Result res = TEEC_ERROR_GENERIC;
@@ -204,8 +136,6 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 			shm->buffer = tmpref->buffer;
 		} else {
 			shadow = teec_paged_aligned_alloc(tmpref->size);
-			LOG_DBG("buffer %p doesn't aligned, allocating shadow buffer %p",
-				tmpref->buffer, shadow);
 			if (!shadow)
 				return TEEC_ERROR_OUT_OF_MEMORY;
 
@@ -214,7 +144,7 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 		res = TEEC_RegisterSharedMemory(ctx, shm);
 		if (res != TEEC_SUCCESS){
 			if (shadow)
-				k_free(shadow);
+				teec_free(shadow);
 			return res;
 		}
 
@@ -233,7 +163,7 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 }
 
 static TEEC_Result teec_pre_process_whole(TEEC_RegisteredMemoryReference *memref,
-					  struct tee_param *param)
+					  struct teec_param *param)
 {
 	const uint32_t inout = TEEC_MEM_INPUT | TEEC_MEM_OUTPUT;
 	uint32_t flags = memref->parent->flags & inout;
@@ -265,7 +195,7 @@ static TEEC_Result teec_pre_process_whole(TEEC_RegisteredMemoryReference *memref
 
 static TEEC_Result teec_pre_process_partial(uint32_t param_type,
 		TEEC_RegisteredMemoryReference *memref,
-		struct tee_param *param)
+		struct teec_param *param)
 {
 	uint32_t req_shm_flags = 0;
 	TEEC_SharedMemory *shm = NULL;
@@ -314,7 +244,7 @@ static TEEC_Result teec_pre_process_partial(uint32_t param_type,
 
 static TEEC_Result teec_pre_process_operation(TEEC_Context *ctx,
 		TEEC_Operation *operation,
-		struct tee_param *params,
+		struct teec_param *params,
 		TEEC_SharedMemory *shms)
 {
 	TEEC_Result res = TEEC_ERROR_GENERIC;
@@ -327,7 +257,7 @@ static TEEC_Result teec_pre_process_operation(TEEC_Context *ctx,
 		shms[n].id = -1;
 
 	if (!operation) {
-		memset(params, 0, sizeof(struct tee_param) *
+		memset(params, 0, sizeof(struct teec_param) *
 				TEEC_CONFIG_PAYLOAD_REF_COUNT);
 		return TEEC_SUCCESS;
 	}
@@ -381,7 +311,7 @@ static TEEC_Result teec_pre_process_operation(TEEC_Context *ctx,
 
 static void teec_post_process_tmpref(uint32_t param_type,
 		TEEC_TempMemoryReference *tmpref,
-		struct tee_param *param,
+		struct teec_param *param,
 		TEEC_SharedMemory *shm)
 {
 	if (param_type != TEEC_MEMREF_TEMP_INPUT) {
@@ -394,7 +324,7 @@ static void teec_post_process_tmpref(uint32_t param_type,
 }
 
 static void teec_post_process_whole(TEEC_RegisteredMemoryReference *memref,
-				    struct tee_param *param)
+				    struct teec_param *param)
 {
 	TEEC_SharedMemory *shm = memref->parent;
 
@@ -413,7 +343,7 @@ static void teec_post_process_whole(TEEC_RegisteredMemoryReference *memref,
 }
 
 static void teec_post_process_partial(uint32_t param_type, TEEC_RegisteredMemoryReference *memref,
-				      struct tee_param *param)
+				      struct teec_param *param)
 {
 	if (param_type != TEEC_MEMREF_PARTIAL_INPUT) {
 		TEEC_SharedMemory *shm = memref->parent;
@@ -431,7 +361,7 @@ static void teec_post_process_partial(uint32_t param_type, TEEC_RegisteredMemory
 	}
 }
 
-static void teec_post_process_operation(TEEC_Operation *operation, struct tee_param *params,
+static void teec_post_process_operation(TEEC_Operation *operation, struct teec_param *params,
 					TEEC_SharedMemory *shms)
 {
 	size_t n = 0;
@@ -516,7 +446,7 @@ static void uuid_to_octets(uint8_t d[TEE_UUID_LEN], const TEEC_UUID *s)
 	memcpy(d + 8, s->clockSeqAndNode, sizeof(s->clockSeqAndNode));
 }
 
-static void setup_client_data(struct tee_open_session_arg *arg, uint32_t connection_method,
+static void setup_client_data(struct teec_open_session_arg *arg, uint32_t connection_method,
 			      const void *connection_data)
 {
 	arg->clnt_login = connection_method;
@@ -573,22 +503,14 @@ TEEC_Result TEEC_OpenSession(TEEC_Context *ctx, TEEC_Session *session,
 		uint32_t connection_method, const void *connection_data,
 		TEEC_Operation *operation, uint32_t *ret_origin)
 {
-	struct tee_open_session_arg arg;
-	struct tee_param params[TEEC_CONFIG_PAYLOAD_REF_COUNT];
+	struct teec_open_session_arg arg = {0};
+	struct teec_param params[TEEC_CONFIG_PAYLOAD_REF_COUNT];
 	TEEC_Result res = TEEC_ERROR_GENERIC;
 	uint32_t eorig = 0;
 	int rc = 0;
-	const size_t arg_size = sizeof(struct tee_open_session_arg) +
-		TEEC_CONFIG_PAYLOAD_REF_COUNT *
-		sizeof(struct tee_param);
 	uint32_t session_id;
-	union {
-		struct tee_open_session_arg arg;
-		uint8_t data[arg_size];
-	} buf;
 	TEEC_SharedMemory shm[TEEC_CONFIG_PAYLOAD_REF_COUNT];
 
-	memset(&buf, 0, sizeof(buf));
 	memset(&shm, 0, sizeof(shm));
 
 	if (!ctx || !session) {
@@ -607,9 +529,8 @@ TEEC_Result TEEC_OpenSession(TEEC_Context *ctx, TEEC_Session *session,
 		goto out_free_temp_refs;
 	}
 
-	rc = tee_open_session(ctx->dev, &arg, TEEC_CONFIG_PAYLOAD_REF_COUNT, params, &session_id);
+	rc = teec_open_session(ctx->dev, &arg, TEEC_CONFIG_PAYLOAD_REF_COUNT, params, &session_id);
 	if (rc) {
-		LOG_ERR("tee_open_session failed");
 		eorig = TEEC_ORIGIN_COMMS;
 		res = errno_to_res(errno);
 		goto out_free_temp_refs;
@@ -635,15 +556,14 @@ void TEEC_CloseSession(TEEC_Session *session)
 	if (!session || !session->ctx)
 		return;
 
-	if (tee_close_session(session->ctx->dev, session->session_id))
-		LOG_ERR("Failed to close session 0x%x", session->session_id);
+	teec_close_session(session->ctx->dev, session->session_id);
 }
 
 TEEC_Result TEEC_InvokeCommand(TEEC_Session *session, uint32_t cmd_id,
 			       TEEC_Operation *operation, uint32_t *error_origin)
 {
-	struct tee_invoke_func_arg arg;
-	struct tee_param params[TEEC_CONFIG_PAYLOAD_REF_COUNT];
+	struct teec_invoke_func_arg arg;
+	struct teec_param params[TEEC_CONFIG_PAYLOAD_REF_COUNT];
 	TEEC_Result res = TEEC_ERROR_GENERIC;
 	uint32_t eorig = 0;
 	int rc = 0;
@@ -662,9 +582,9 @@ TEEC_Result TEEC_InvokeCommand(TEEC_Session *session, uint32_t cmd_id,
 	arg.func = cmd_id;
 
 	if (operation) {
-		teec_mutex_lock(&teec_mutex);
+		teec_mutex_lock();
 		operation->session = session;
-		teec_mutex_unlock(&teec_mutex);
+		teec_mutex_unlock();
 	}
 
 	res = teec_pre_process_operation(session->ctx, operation, params, shm);
@@ -672,9 +592,8 @@ TEEC_Result TEEC_InvokeCommand(TEEC_Session *session, uint32_t cmd_id,
 		eorig = TEEC_ORIGIN_API;
 		goto out_free_temp_refs;
 	}
-	rc = tee_invoke_func(session->ctx->dev, &arg, TEEC_CONFIG_PAYLOAD_REF_COUNT, params);
+	rc = teec_invoke_func(session->ctx->dev, &arg, TEEC_CONFIG_PAYLOAD_REF_COUNT, params);
 	if (rc) {
-		LOG_ERR("tee_invoke_func failed");
 		eorig = TEEC_ORIGIN_COMMS;
 		res = errno_to_res(errno);
 		goto out_free_temp_refs;
@@ -699,15 +618,14 @@ void TEEC_RequestCancellation(TEEC_Operation *operation)
 	if (!operation)
 		return;
 
-	teec_mutex_lock(&teec_mutex);
+	teec_mutex_lock();
 	session = operation->session;
-	teec_mutex_unlock(&teec_mutex);
+	teec_mutex_unlock();
 
 	if (!session)
 		return;
 
-	if (tee_cancel(session->ctx->dev, session->session_id, 0))
-		LOG_ERR("TEE_IOC_CANCEL: %s", strerror(errno));
+	teec_cancel(session->ctx->dev, session->session_id, 0);
 }
 
 TEEC_Result TEEC_RegisterSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
@@ -765,7 +683,7 @@ TEEC_Result TEEC_RegisterSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 			res = TEEC_ERROR_OUT_OF_MEMORY;
 		else
 			res = TEEC_ERROR_GENERIC;
-		k_free(shm->shadow_buffer);
+		teec_free(shm->shadow_buffer);
 		shm->shadow_buffer = NULL;
 		return res;
 	} else {
@@ -807,7 +725,7 @@ TEEC_Result TEEC_AllocateSharedMemory(TEEC_Context *ctx, TEEC_SharedMemory *shm)
 
 		ret = teec_shm_register(ctx->dev, shm->buffer, s, 0, &shmem);
 		if (ret) {
-			k_free(shm->buffer);
+			teec_free(shm->buffer);
 			shm->buffer = NULL;
 			return TEEC_ERROR_OUT_OF_MEMORY;
 		}
@@ -837,17 +755,17 @@ void TEEC_ReleaseSharedMemory(TEEC_SharedMemory *shm)
 	if (shm->shadow_buffer) {
 		if (shm->registered_shm) {
 			if (shm->internal.flags & SHM_FLAG_SHADOW_BUFFER_ALLOCED)
-				k_free(shm->shadow_buffer);
-			tee_shm_unregister(shm->dev, shm->registered_shm);
+				teec_free(shm->shadow_buffer);
+			teec_shm_unregister(shm->dev, shm->registered_shm);
 		}
 	} else if (shm->buffer) {
 		if (shm->registered_shm) {
 			if (shm->internal.flags & SHM_FLAG_BUFFER_ALLOCED)
-				k_free(shm->buffer);
-			tee_shm_unregister(shm->dev, shm->registered_shm);
+				teec_free(shm->buffer);
+			teec_shm_unregister(shm->dev, shm->registered_shm);
 		}
 	} else if (shm->registered_shm) {
-		tee_shm_unregister(shm->dev, shm->registered_shm);
+		teec_shm_unregister(shm->dev, shm->registered_shm);
 	}
 
 	shm->id = TEEC_SHM_INVALID_ID;

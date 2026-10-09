@@ -29,13 +29,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zephyr/logging/log.h>
 #include <teec_ta_load.h>
 
 #define BINARY_PREFIX ta_load
 #include <teec_trace.h>
 
-LOG_MODULE_REGISTER(teec_ta_load);
 static struct ta_table *ta_table;
 
 void TEEC_SetTATable(struct ta_table *table)
