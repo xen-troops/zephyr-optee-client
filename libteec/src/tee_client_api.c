@@ -34,8 +34,8 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/tee.h>
 #include <zephyr/kernel.h>
-#include <zephyr/xen/generic.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/util.h>
 #include <tee_client_api_extensions.h>
 #include <tee_client_api.h>
 
@@ -46,6 +46,8 @@ LOG_MODULE_REGISTER(tee_client_api);
 #endif
 
 #include <tee.h>
+
+#define TEE_CLIENT_PAGE_SIZE 4096
 
 #define DT_COMPATIBLE linaro_optee_tz
 
@@ -77,7 +79,7 @@ static void teec_mutex_unlock(struct k_mutex  *mu)
 
 static void *teec_paged_aligned_alloc(size_t sz)
 {
-	return k_aligned_alloc(XEN_PAGE_SIZE, sz);
+	return k_aligned_alloc(TEE_CLIENT_PAGE_SIZE, sz);
 }
 
 static int teec_open_dev(struct device const **dev, const char *capabilities,
@@ -164,6 +166,7 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 			TEEC_SharedMemory *shm)
 {
 	TEEC_Result res = TEEC_ERROR_GENERIC;
+	void *shadow = NULL;
 
 	switch (param_type) {
 		case TEEC_MEMREF_TEMP_INPUT:
@@ -198,13 +201,29 @@ static TEEC_Result teec_pre_process_tmpref(TEEC_Context *ctx,
 			MEMREF_SHM_ID(param) = shm->id;
 		}
 	} else {
-		shm->buffer = tmpref->buffer;
-		res = TEEC_RegisterSharedMemory(ctx, shm);
-		if (res != TEEC_SUCCESS)
-			return res;
+		if (IS_ALIGNED(tmpref->buffer, TEE_CLIENT_PAGE_SIZE)) {
+			shm->buffer = tmpref->buffer;
+		} else {
+			shadow = teec_paged_aligned_alloc(tmpref->size);
+			LOG_DBG("buffer %p doesn't aligned, allocating shadow buffer %p",
+				tmpref->buffer, shadow);
+			if (!shadow)
+				return TEEC_ERROR_OUT_OF_MEMORY;
 
-		if (shm->shadow_buffer)
+			shm->buffer = shadow;
+		}
+		res = TEEC_RegisterSharedMemory(ctx, shm);
+		if (res != TEEC_SUCCESS){
+			if (shadow)
+				k_free(shadow);
+			return res;
+		}
+
+		if (shadow) {
+			shm->shadow_buffer = shadow;
+			shm->internal.flags = SHM_FLAG_SHADOW_BUFFER_ALLOCED;
 			memcpy(shm->shadow_buffer, tmpref->buffer, tmpref->size);
+		}
 
 		MEMREF_SHM_ID(param) = shm->id;
 	}
