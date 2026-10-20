@@ -37,7 +37,7 @@ extern "C" {
 #include <stddef.h>
 #include <stdbool.h>
 #include <limits.h>
-#include <zephyr/drivers/tee.h>
+#include <tee.h>
 
 /*
  * Defines the number of available memory references in an open session or
@@ -250,6 +250,9 @@ extern "C" {
 
 typedef uint32_t TEEC_Result;
 
+struct device;
+struct tee_shm;
+
 /**
  * struct TEEC_Context - Represents a connection between a client application
  * and a TEE.
@@ -416,6 +419,206 @@ typedef struct {
 	/* Implementation-Defined */
 	TEEC_Session *session;
 } TEEC_Operation;
+
+/**
+ * @brief TEE version
+ *
+ * Identifies the TEE implementation, @ref impl_id is one of TEE_IMPL_ID_* above.
+ * @ref impl_caps is implementation specific, for example TEE_OPTEE_CAP_*
+ * is valid when @ref impl_id == TEE_IMPL_ID_OPTEE.
+ */
+struct teec_version_info {
+	uint32_t impl_id; /**< [out] TEE implementation id */
+	uint32_t impl_caps; /**< [out] implementation specific capabilities */
+	uint32_t gen_caps;  /**< Generic capabilities, defined by TEE_GEN_CAPS_* above */
+};
+
+ /**
+  * @brief - Open session argument
+  */
+struct teec_open_session_arg {
+	uint8_t uuid[TEE_UUID_LEN]; /**< [in] UUID of the Trusted Application */
+	uint8_t clnt_uuid[TEE_UUID_LEN]; /**< [in] UUID of client */
+	uint32_t clnt_login; /**< login class of client, TEE_IOCTL_LOGIN_* above */
+	uint32_t ret; /**< [out] return value */
+	uint32_t ret_origin; /**< [out] origin of the return value */
+};
+
+/**
+ * @brief Invokes a function in a Trusted Application
+ */
+struct teec_invoke_func_arg {
+	uint32_t func;       /**< [in] Trusted Application function, specific to the TA */
+	uint32_t session;    /**< [in] session id */
+	uint32_t ret;        /**< [out] return value */
+	uint32_t ret_origin; /**< [out] origin of the return value */
+};
+
+/**
+ * @brief Tee parameter
+ *
+ * @ref attr & TEE_PARAM_ATTR_TYPE_MASK indicates if memref or value is used in
+ * the union. TEE_PARAM_ATTR_TYPE_VALUE_* indicates value and
+ * TEE_PARAM_ATTR_TYPE_MEMREF_* indicates memref. TEE_PARAM_ATTR_TYPE_NONE
+ * indicates that none of the members are used.
+ *
+ * Shared memory is allocated with TEE_IOC_SHM_ALLOC which returns an
+ * identifier representing the shared memory object. A memref can reference
+ * a part of a shared memory by specifying an offset (@ref a) and size (@ref b) of
+ * the object. To supply the entire shared memory object set the offset
+ * (@ref a) to 0 and size (@ref b) to the previously returned size of the object.
+ */
+struct teec_param {
+	uint64_t attr; /**< attributes */
+	uint64_t a; /**< if a memref, offset into the shared memory object, else a value*/
+	uint64_t b; /**< if a memref, size of the buffer, else a value parameter */
+	uint64_t c; /**< if a memref, shared memory identifier, else a value parameter */
+};
+
+/**
+ * @brief Lock the main TEE client mutex.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_mutex_lock(void);
+
+/**
+ * @brief Unlock the main TEE client mutex.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_mutex_unlock(void);
+
+/**
+ * @brief Lock the cryptographic TEE client mutex.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int ckteec_mutex_lock(void);
+
+/**
+ * @brief Unlock the cryptographic TEE client mutex.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int ckteec_mutex_unlock(void);
+
+/**
+ * @brief Lock the shared memory TEE client mutex.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int shmteec_mutex_lock(void);
+
+/**
+ * @brief Unlock the shared memory TEE client mutex.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int shmteec_mutex_unlock(void);
+
+/**
+ * @brief Open a session with a Trusted Application.
+ * 
+ * @param[in] dev Pointer to the TEE device.
+ * @param[in,out] teec_arg Pointer to the session arguments structure.
+ * @param[in] num_param Number of parameters provided.
+ * @param[in,out] cparam Pointer to the array of parameters.
+ * @param[out] session_id Pointer to store the created session identifier.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_open_session(const struct device *dev, struct teec_open_session_arg *teec_arg,
+		      unsigned int num_param, struct teec_param *cparam, uint32_t *session_id);
+
+/**
+ * @brief Close an active session with a Trusted Application.
+ *
+ * @param[in] dev Pointer to the TEE device.
+ * @param[in] session_id Identifier of the session to close.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_close_session(const struct device *dev, uint32_t session_id);
+
+/**
+ * @brief Invoke a function/command on an active Trusted Application session.
+ *
+ * @param[in] dev Pointer to the TEE device.
+ * @param[in,out] teec_arg Pointer to the invocation arguments structure.
+ * @param[in] num_param Number of parameters provided.
+ * @param[in,out] cparam Pointer to the array of parameters.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_invoke_func(const struct device *dev, struct teec_invoke_func_arg *teec_arg,
+		     unsigned int num_param, struct teec_param *cparam);
+
+/**
+ * @brief Cancel an ongoing operation or command on a session.
+ *
+ * @param[in] dev Pointer to the TEE device.
+ * @param[in] session_id Identifier of the target session.
+ * @param[in] cancel_id Identifier of the cancellation request.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_cancel(const struct device *dev, uint32_t session_id, uint32_t cancel_id);
+
+/**
+ * @brief Allocate memory from the heap with page alignment.
+ *
+ * @param size Amount of memory requested (in bytes).
+ * @return Address of the allocated memory if successful; otherwise NULL.
+ */
+void *teec_paged_aligned_alloc(size_t sz);
+
+/**
+ * @brief Allocate shared memory managed by the TEE device driver.
+ *
+ * @param[in] dev Pointer to the TEE device.
+ * @param[in] size Size of the shared memory region in bytes.
+ * @param[in] flags Allocation flags (e.g., input/output).
+ * @return Pointer to the allocated shared memory structure, or NULL on failure.
+ */
+struct tee_shm *teec_shm_alloc(const struct device *dev, size_t size, uint32_t flags);
+
+/**
+ * @brief Register an existing memory buffer as shared memory with the TEE device.
+ *
+ * @param[in] dev Pointer to the TEE device.
+ * @param[in] buf Pointer to the local buffer to register.
+ * @param[in] size Size of the buffer in bytes.
+ * @param[in] flags Registration flags.
+ * @param[out] shm Double pointer to receive the registered shared memory structure.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_shm_register(const struct device *dev, void *buf, size_t size, uint32_t flags,
+		      struct tee_shm **shm);
+
+/**
+ * @brief Unregister a previously registered shared memory buffer.
+ *
+ * @param[in] dev Pointer to the TEE device.
+ * @param[in] shm Pointer to the shared memory structure to unregister.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_shm_unregister(const struct device *dev, struct tee_shm *shm);
+
+/**
+ * @brief Retrieve and validate the TEE device instance and its capabilities.
+ *
+ * @param[out] dev Double pointer to store the retrieved TEE device reference.
+ * @param[in] capabilities Optional string specifying required device capabilities.
+ * @param[out] gen_caps Pointer to store general device capabilities bitmask.
+ * @return 0 on success, or a negative error code on failure.
+ */
+int teec_open_dev(struct device const **dev, const char *capabilities, uint32_t *gen_caps);
+
+/**
+ * @brief Allocate heap memory via kernel allocator.
+ *
+ * @param[in] size Size of the allocation in bytes.
+ * @return Pointer to the allocated memory, or NULL on failure.
+ */
+void *teec_malloc(size_t size);
+
+/**
+ * @brief Free heap memory allocated via kernel allocator.
+ *
+ * @param[in] ptr Pointer to the memory buffer to free.
+ */
+void teec_free(void *ptr);
 
 /**
  * TEEC_InitializeContext() - Initializes a context holding connection

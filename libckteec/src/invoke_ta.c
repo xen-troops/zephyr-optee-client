@@ -17,23 +17,17 @@
 #include <sys/types.h>
 #include <tee_client_api.h>
 #include <teec_trace.h>
-#include <zephyr/kernel.h>
 #include "ck_helpers.h"
 #include "invoke_ta.h"
 #include "local_utils.h"
 
 struct ta_context {
-	struct k_mutex *init_mutex;
 	bool initiated;
 	TEEC_Context context;
 	TEEC_Session session;
 };
 
-static K_MUTEX_DEFINE(init_mutex);
-
-static struct ta_context ta_ctx = {
-	.init_mutex = &init_mutex,
-};
+static struct ta_context ta_ctx = {};
 
 bool ckteec_invoke_initiated(void)
 {
@@ -244,7 +238,7 @@ CK_RV ckteec_invoke_init(void)
 	void *login_data = NULL;
 	int e = 0;
 
-	e = k_mutex_lock(ta_ctx.init_mutex, K_FOREVER);
+	e = ckteec_mutex_lock();
 	if (e)
 		return CKR_CANT_LOCK;
 
@@ -279,7 +273,7 @@ CK_RV ckteec_invoke_init(void)
 	}
 
 out:
-	e = k_mutex_unlock(ta_ctx.init_mutex);
+	e = ckteec_mutex_unlock();
 	if (e) {
 		EMSG("k_mutex_unlock: %s", strerror(e));
 		EMSG("terminating...");
@@ -294,7 +288,7 @@ CK_RV ckteec_invoke_terminate(void)
 	CK_RV rv = CKR_CRYPTOKI_NOT_INITIALIZED;
 	int e = 0;
 
-	e = k_mutex_lock(ta_ctx.init_mutex, K_FOREVER);
+	e = ckteec_mutex_lock();
 	if (e) {
 		EMSG("k_mutex_lock: %s", strerror(e));
 		EMSG("terminating...");
@@ -311,7 +305,7 @@ CK_RV ckteec_invoke_terminate(void)
 	rv = CKR_OK;
 
 out:
-	e = k_mutex_unlock(ta_ctx.init_mutex);
+	e = ckteec_mutex_unlock();
 	if (e) {
 		EMSG("k_mutex_unlock: %s", strerror(e));
 		EMSG("terminating...");

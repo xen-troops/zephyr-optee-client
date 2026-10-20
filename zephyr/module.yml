@@ -1,5 +1,6 @@
 name: opteelib
 build:
   cmake: .
+  cmake-ext: True
   kconfig: Kconfig
 

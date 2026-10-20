@@ -65,7 +65,7 @@ typedef unsigned short gid_t;
 #define TEE_OPTEE_CAP_TZ	(1 << 0)
 
 /*
- * Attributes for struct tee_param, selects field in the union
+ * Attributes for struct teec_param, selects field in the union
  */
 #define TEE_PARAM_ATTR_TYPE_NONE		0	/* parameter not used */
 
